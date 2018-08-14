@@ -170,6 +170,22 @@ void AnnotatedDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
         expand_datum = &anno_datum;
       }
     }
+    if(transform_param.has_expand_param())
+    {
+        AnnotatedDatum blur_datum;
+        this->data_transformer_->BlurImage(*expand_datum,&blur_datum);
+
+        AnnotatedDatum perspective_datum;
+        this->data_transformer_->PerspectiveImage(blur_datum,&perspective_datum);
+
+        AnnotatedDatum* rotated_datum = new AnnotatedDatum();
+        this->data_transformer_->RotateImage(perspective_datum,rotated_datum);
+        if(expand_datum!=NULL)
+            delete expand_datum;
+        expand_datum=rotated_datum;
+    }
+//    DataTransformer<Dtype>::ShowAnnotatedData("preprocess",*expand_datum);
+
     AnnotatedDatum* sampled_datum = NULL;
     bool has_sampled = false;
     if (batch_samplers_.size() > 0) {
@@ -191,6 +207,8 @@ void AnnotatedDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
       sampled_datum = expand_datum;
     }
     CHECK(sampled_datum != NULL);
+//    DataTransformer<Dtype>::ShowAnnotatedData("sampled",*sampled_datum);
+
     timer.Start();
     vector<int> shape =
         this->data_transformer_->InferBlobShape(sampled_datum->datum());

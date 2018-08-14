@@ -173,6 +173,14 @@ class DataTransformer {
   void TransformInv(const Blob<Dtype>* blob, vector<cv::Mat>* cv_imgs);
   void TransformInv(const Dtype* data, cv::Mat* cv_img, const int height,
                     const int width, const int channels);
+
+  void RotateImage(const AnnotatedDatum& anno_datum,
+                   AnnotatedDatum* rotated_anno_datum);
+  void RotateImage(const Datum& datum, cv::Mat &affineMatrix, Datum* expanded_datum);
+
+  void BlurImage(const AnnotatedDatum& datum, AnnotatedDatum* blur_datum);
+  void PerspectiveImage(const AnnotatedDatum& anno_datum,
+                   AnnotatedDatum* perspectived_anno_datum);
 #endif  // USE_OPENCV
 
   /**
@@ -223,6 +231,11 @@ class DataTransformer {
    *    cv::Mat containing the data to be transformed.
    */
   vector<int> InferBlobShape(const cv::Mat& cv_img);
+
+
+  static void ShowAnnotatedData(const std::string &name,const AnnotatedDatum& anno_datum);
+//  #include <opencv2/highgui.hpp>
+//  cv::Point2f GetMeanBBoxCenter(const AnnotatedDatum &anno_datum);
 #endif  // USE_OPENCV
 
  protected:
@@ -247,6 +260,9 @@ class DataTransformer {
    */
   void Transform(const Datum& datum, Blob<Dtype>* transformed_blob,
                  NormalizedBBox* crop_bbox, bool* do_mirror);
+
+
+
 
   // Tranformation parameters
   TransformationParameter param_;

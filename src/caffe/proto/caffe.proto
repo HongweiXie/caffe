@@ -578,6 +578,12 @@ message TransformationParameter {
   optional ExpansionParameter expand_param = 14;
   // Constraint for emitting the annotation after transformation.
   optional EmitConstraint emit_constraint = 10;
+  //Rotate policy
+  optional RotateParameter rotate_param=15;
+  //Perspective policy
+  optional PerspectiveParameter perspective_param=16;
+  //Blur policy
+  optional BlurParameter blur_param=17;
 }
 
 // Message that stores parameters used by data transformer for resize policy
@@ -703,6 +709,33 @@ message ExpansionParameter {
 
   // The ratio to expand the image.
   optional float max_expand_ratio = 2 [default = 1.];
+}
+
+// Message that stores parameters used by data transformer for rotate policy
+message RotateParameter {
+  //Probability of using this rotate policy
+  optional float prob = 1 [default = 0];
+
+  // The ratio to rotate the image.
+  optional float rotate_delta = 2 [default = 0.];
+}
+
+// Message that stores parameters used by data transformer for perspective policy
+message PerspectiveParameter {
+  //Probability of using this perspective policy
+  optional float prob = 1 [default = 0];
+
+  // The min ratio to perspective the image.
+  optional float min_perspective_ratio = 2 [default = -0.1];
+
+  // The max ratio to perspective the image.
+  optional float max_perspective_ratio = 3 [default = 0.1];
+}
+
+// Message that stores parameters used by data transformer for blur policy
+message BlurParameter {
+  //Probability of using this blur policy
+  optional float prob = 1 [default = 0];
 }
 
 // Message that stores parameters shared by loss layers

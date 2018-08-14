@@ -4,6 +4,8 @@
 
 #include <string>
 #include <vector>
+#include <math.h>
+#include <algorithm>
 
 #include "caffe/data_transformer.hpp"
 #include "caffe/util/bbox_util.hpp"
@@ -359,6 +361,8 @@ void DataTransformer<Dtype>::CropImage(const Datum& datum,
     // Crop the image.
     cv::Mat crop_img;
     CropImage(cv_img, bbox, &crop_img);
+//    cv::imshow("corp_img",crop_img);
+//    cv::waitKey(200);
     // Save the image into datum.
     EncodeCVMatToDatum(crop_img, "jpg", crop_datum);
     crop_datum->set_label(datum.label());
@@ -533,6 +537,327 @@ void DataTransformer<Dtype>::ExpandImage(const AnnotatedDatum& anno_datum,
   const bool do_mirror = false;
   TransformAnnotation(anno_datum, do_resize, expand_bbox, do_mirror,
                       expanded_anno_datum->mutable_annotation_group());
+
+//  ShowAnnotatedData(expanded_anno_datum);
+}
+
+static cv::Point2f GetMeanBBoxCenter(const AnnotatedDatum &expanded_anno_datum)
+{
+    const int img_height = expanded_anno_datum.datum().height();
+    const int img_width = expanded_anno_datum.datum().width();
+    float mean_x=0;
+    float mean_y=0;
+    int cnt=0;
+    // Go through each AnnotationGroup.
+    for (int g = 0; g < expanded_anno_datum.annotation_group_size(); ++g) {
+      const AnnotationGroup& anno_group = expanded_anno_datum.annotation_group(g);
+      // Go through each Annotation.
+      for (int a = 0; a < anno_group.annotation_size(); ++a) {
+        const Annotation& anno = anno_group.annotation(a);
+        const NormalizedBBox& bbox = anno.bbox();
+        float cx=(bbox.xmin()+bbox.xmax())*img_width/2;
+        float cy=(bbox.ymin()+bbox.ymax())*img_height/2;
+        mean_x+=cx;
+        mean_y+=cy;
+        cnt+=1;
+      }
+    }
+    return cv::Point2f(mean_x/cnt,mean_y/cnt);
+}
+template<typename Dtype>
+void DataTransformer<Dtype>::PerspectiveImage(const AnnotatedDatum &anno_datum, AnnotatedDatum *perspectived_anno_datum)
+{
+    if(!param_.has_perspective_param())
+    {
+        perspectived_anno_datum->CopyFrom(anno_datum);
+        return;
+    }
+    const float perpective_prob=param_.perspective_param().prob();
+    const float perspective_min_ratio=param_.perspective_param().min_perspective_ratio();
+    const float perspective_max_ratio=param_.perspective_param().max_perspective_ratio();
+//    LOG(INFO)<<"perpective:"<<perpective_prob<<","<<perspective_min_ratio<<","<<perspective_max_ratio;
+    float prob;
+    caffe_rng_uniform(1, 0.f, 1.f, &prob);
+    if (prob > perpective_prob) {
+      perspectived_anno_datum->CopyFrom(anno_datum);
+      return;
+    }
+    cv::Mat cv_img= DecodeDatumToCVMatNative(anno_datum.datum());
+    const int img_height = anno_datum.datum().height();
+    const int img_width = anno_datum.datum().width();
+
+
+    cv::Point2f dst[]={cv::Point2f(0,0),cv::Point2f(img_width,0),cv::Point2f(0,img_height),cv::Point2f(img_width,img_height)};
+    cv::Point2f src[4];
+    for(int i=0;i<4;i++)
+    {
+        float jitter_x,jitter_y;
+        caffe_rng_uniform(1, perspective_min_ratio, perspective_max_ratio, &jitter_x);
+        caffe_rng_uniform(1, perspective_min_ratio, perspective_max_ratio, &jitter_y);
+        src[i]=cv::Point2f(dst[i].x+jitter_x*img_width,dst[i].y+jitter_y*img_height);
+    }
+    cv::Mat PM=cv::getPerspectiveTransform(src,dst);
+    cv::Mat perspectived_img;
+    cv::warpPerspective(cv_img,perspectived_img,PM,cv::Size(img_width,img_height));
+    EncodeCVMatToDatum(perspectived_img, "jpg", perspectived_anno_datum->mutable_datum());
+    perspectived_anno_datum->mutable_datum()->set_label(anno_datum.datum().label());
+
+    bool has_valid_anno_group=false;
+    // Go through each AnnotationGroup.
+    for (int g = 0; g < anno_datum.annotation_group_size(); ++g) {
+      const AnnotationGroup& anno_group = anno_datum.annotation_group(g);
+      AnnotationGroup transformed_anno_group;
+      // Go through each Annotation.
+      bool has_valid_annotation = false;
+      for (int a = 0; a < anno_group.annotation_size(); ++a) {
+        const Annotation& anno = anno_group.annotation(a);
+        const NormalizedBBox& bbox = anno.bbox();
+
+        cv::Point2f lefttop(bbox.xmin()*img_width,bbox.ymin()*img_height);
+        cv::Point2f rightbottom(bbox.xmax()*img_width,bbox.ymax()*img_height);
+        cv::Point2f leftbottom(bbox.xmin()*img_width,bbox.ymax()*img_height);
+        cv::Point2f righttop(bbox.xmax()*img_width,bbox.ymin()*img_height);
+
+        std::vector<cv::Point2f> tmpInputPoints;
+        tmpInputPoints.push_back(lefttop);
+        tmpInputPoints.push_back(rightbottom);
+        tmpInputPoints.push_back(leftbottom);
+        tmpInputPoints.push_back(righttop);
+        std::vector<cv::Point2f> tmpOutputPoints;
+        tmpOutputPoints.resize(4);
+        cv::perspectiveTransform(tmpInputPoints,tmpOutputPoints,PM);
+
+        float xmin=img_width,ymin=img_height,xmax=0,ymax=0;
+        for(int i=0;i<4;i++)
+        {
+            const cv::Point2f &p=tmpOutputPoints[i];
+            xmin=std::min(p.x,xmin);
+            ymin=std::min(p.y,ymin);
+            xmax=std::max(p.x,xmax);
+            ymax=std::max(p.y,ymax);
+        }
+        NormalizedBBox proj_bbox=bbox;
+        proj_bbox.set_xmin(std::max(0.0f,xmin/img_width));
+        proj_bbox.set_ymin(std::max(0.0f,ymin/img_height));
+        proj_bbox.set_xmax(std::min(1.f,xmax/img_width));
+        proj_bbox.set_ymax(std::min(1.f,ymax/img_height));
+        NormalizedBBox crop_bbox=bbox;
+        crop_bbox.set_xmin(0.f);
+        crop_bbox.set_ymin(0.f);
+        crop_bbox.set_xmax(1.f);
+        crop_bbox.set_ymax(1.f);
+        if (param_.has_emit_constraint() &&
+            !MeetEmitConstraint(crop_bbox, proj_bbox,
+                                param_.emit_constraint())) {
+          continue;
+        }
+        has_valid_annotation=true;
+        Annotation* transformed_anno =
+            transformed_anno_group.add_annotation();
+        transformed_anno->set_instance_id(anno.instance_id());
+        NormalizedBBox* transformed_bbox = transformed_anno->mutable_bbox();
+        transformed_bbox->CopyFrom(proj_bbox);
+
+      }
+      if(has_valid_annotation)
+      {
+          transformed_anno_group.set_group_label(anno_group.group_label());
+          perspectived_anno_datum->mutable_annotation_group()->Add()->CopyFrom(transformed_anno_group);
+          has_valid_anno_group=true;
+      }
+    }
+
+    if(!has_valid_anno_group)
+    {
+        perspectived_anno_datum->CopyFrom(anno_datum);
+        return;
+    }
+//    ShowAnnotatedData("perspective",*perspectived_anno_datum);
+}
+
+template<typename Dtype>
+void DataTransformer<Dtype>::RotateImage(const AnnotatedDatum &anno_datum, AnnotatedDatum *rotated_anno_datum)
+{
+    if(!param_.has_rotate_param())
+    {
+        rotated_anno_datum->CopyFrom(anno_datum);
+        return;
+    }
+    const float rotate_prob=param_.rotate_param().prob();
+    const float max_roate_degree=param_.rotate_param().rotate_delta();
+//    LOG(INFO)<<"rotate:"<<rotate_prob<<","<<max_roate_degree;
+    const float min_scale=0.8,max_scale=1.0;
+    float prob;
+    caffe_rng_uniform(1, 0.f, 1.f, &prob);
+    if (prob > rotate_prob) {
+      rotated_anno_datum->CopyFrom(anno_datum);
+      return;
+    }
+
+    caffe_rng_uniform(1, -1.f, 1.f, &prob);
+    float rotation_degree=prob*max_roate_degree;
+    cv::Mat cv_img;
+    cv_img = DecodeDatumToCVMatNative(anno_datum.datum());
+    const int img_height = anno_datum.datum().height();
+    const int img_width = anno_datum.datum().width();
+//    cv::Point2f imgCenter(img_width/2., img_height/2.);
+    cv::Point2f imgCenter=GetMeanBBoxCenter(anno_datum);
+    float scale;
+    caffe_rng_uniform(1, min_scale, max_scale, &scale);
+    cv::Mat rotateMatrix = cv::getRotationMatrix2D(imgCenter, rotation_degree, scale);
+
+    cv::Mat rotated_img;
+    cv::warpAffine(cv_img, rotated_img, rotateMatrix, cv::Size(img_width, img_height));
+    EncodeCVMatToDatum(rotated_img, "jpg", rotated_anno_datum->mutable_datum());
+    rotated_anno_datum->mutable_datum()->set_label(anno_datum.datum().label());
+
+//    ShowAnnotatedData("ori",anno_datum);
+//    std::cout<<rotateMatrix<<std::endl;
+    bool has_valid_anno_group=false;
+    // Go through each AnnotationGroup.
+    for (int g = 0; g < anno_datum.annotation_group_size(); ++g) {
+      const AnnotationGroup& anno_group = anno_datum.annotation_group(g);
+      AnnotationGroup transformed_anno_group;
+      // Go through each Annotation.
+      bool has_valid_annotation = false;
+      for (int a = 0; a < anno_group.annotation_size(); ++a) {
+        const Annotation& anno = anno_group.annotation(a);
+        const NormalizedBBox& bbox = anno.bbox();
+
+        float tmpX[]={bbox.xmin()*img_width,bbox.xmax()*img_width};
+        float tmpY[]={bbox.ymin()*img_height,bbox.ymax()*img_height};
+        float xmin=img_width,ymin=img_height,xmax=0,ymax=0;
+//        std::cout<<rotateMatrix.at<double>(0,0)<<"--"<<rotateMatrix.at<double>(0,1)<<std::endl;
+        for(int i=0;i<2;i++)
+        {
+            for(int j=0;j<2;j++)
+            {
+                float x=tmpX[i];
+                float y=tmpY[j];
+                float x_new=rotateMatrix.at<double>(0,0)*x+rotateMatrix.at<double>(0,1)*y+rotateMatrix.at<double>(0,2);
+                float y_new=rotateMatrix.at<double>(1,0)*x+rotateMatrix.at<double>(1,1)*y+rotateMatrix.at<double>(1,2);
+//                std::cout<<x<<","<<y<<","<<","<<x_new<<","<<y_new<<std::endl;
+                xmin=std::min(x_new,xmin);
+                ymin=std::min(y_new,ymin);
+                xmax=std::max(x_new,xmax);
+                ymax=std::max(y_new,ymax);
+            }
+        }
+
+        NormalizedBBox proj_bbox=bbox;
+        proj_bbox.set_xmin(std::max(0.0f,xmin/img_width));
+        proj_bbox.set_ymin(std::max(0.0f,ymin/img_height));
+        proj_bbox.set_xmax(std::min(1.f,xmax/img_width));
+        proj_bbox.set_ymax(std::min(1.f,ymax/img_height));
+        NormalizedBBox crop_bbox=bbox;
+        crop_bbox.set_xmin(0.f);
+        crop_bbox.set_ymin(0.f);
+        crop_bbox.set_xmax(1.f);
+        crop_bbox.set_ymax(1.f);
+        if (param_.has_emit_constraint() &&
+            !MeetEmitConstraint(crop_bbox, proj_bbox,
+                                param_.emit_constraint())) {
+          continue;
+        }
+        has_valid_annotation=true;
+        Annotation* transformed_anno =
+            transformed_anno_group.add_annotation();
+        transformed_anno->set_instance_id(anno.instance_id());
+        NormalizedBBox* transformed_bbox = transformed_anno->mutable_bbox();
+        transformed_bbox->CopyFrom(proj_bbox);
+
+      }
+      if(has_valid_annotation)
+      {
+          transformed_anno_group.set_group_label(anno_group.group_label());
+          rotated_anno_datum->mutable_annotation_group()->Add()->CopyFrom(transformed_anno_group);
+          has_valid_anno_group=true;
+      }
+    }
+
+    if(!has_valid_anno_group)
+    {
+        rotated_anno_datum->CopyFrom(anno_datum);
+        return;
+    }
+//    ShowAnnotatedData("roated_img",*rotated_anno_datum);
+}
+
+
+
+
+template<typename Dtype>
+void DataTransformer<Dtype>::ShowAnnotatedData(const std::string &name,const AnnotatedDatum &expanded_anno_datum)
+{
+    cv::Mat cv_img;
+    cv_img = DecodeDatumToCVMatNative(expanded_anno_datum.datum());
+    const int img_height = expanded_anno_datum.datum().height();
+    const int img_width = expanded_anno_datum.datum().width();
+//    std::cout<<"aspect ratio:"<<img_width*1.0/img_height<<std::endl;
+    // Go through each AnnotationGroup.
+    for (int g = 0; g < expanded_anno_datum.annotation_group_size(); ++g) {
+      const AnnotationGroup& anno_group = expanded_anno_datum.annotation_group(g);
+      // Go through each Annotation.
+      for (int a = 0; a < anno_group.annotation_size(); ++a) {
+        const Annotation& anno = anno_group.annotation(a);
+        const NormalizedBBox& bbox = anno.bbox();
+        cv::rectangle(cv_img,cv::Point2f(bbox.xmin()*img_width,bbox.ymin()*img_height),cv::Point2f(bbox.xmax()*img_width,bbox.ymax()*img_height),cv::Scalar(0,255,0),3);
+      }
+    }
+    cv::imshow(name,cv_img);
+    cv::waitKey(0);
+}
+template<typename Dtype>
+void DataTransformer<Dtype>::BlurImage(const AnnotatedDatum &anno_datum, AnnotatedDatum *blur_datum)
+{
+    if(!param_.has_blur_param())
+    {
+        blur_datum->CopyFrom(anno_datum);
+        return;
+    }
+    const float blur_prob=param_.blur_param().prob();
+//    LOG(INFO)<<"blur_prob:"<<blur_prob;
+    float prob;
+    caffe_rng_uniform(1, 0.f, 1.f, &prob);
+    if (prob>blur_prob) {
+        blur_datum->CopyFrom(anno_datum);
+        return;
+    }
+    // If datum is encoded, decode and crop the cv::image.
+  #ifdef USE_OPENCV
+    cv::Mat cv_img=DecodeDatumToCVMatNative(anno_datum.datum());
+    // Blur the image.
+    caffe_rng_uniform(1, 0.f, 1.f, &prob);
+    int smooth_type = Rand(4); // see opencv_util.hpp
+    int extra=0;
+    if(prob>0.5)
+        extra=1;
+    int smooth_param1 = 3 + 2*(extra);
+    switch(smooth_type){
+        case 0:
+       //cv::Smooth(cv_img, cv_img, smooth_type, smooth_param1);
+       cv::GaussianBlur(cv_img, cv_img, cv::Size(smooth_param1,smooth_param1),0);
+           break;
+        case 1:
+           cv::blur(cv_img, cv_img, cv::Size(smooth_param1,smooth_param1));
+           break;
+        case 2:
+           cv::medianBlur(cv_img, cv_img, smooth_param1);
+           break;
+        case 3:
+           cv::boxFilter(cv_img, cv_img, -1, cv::Size(smooth_param1*2,smooth_param1*2));
+           break;
+    }
+    // Save the image into datum.
+    EncodeCVMatToDatum(cv_img, "jpg", blur_datum->mutable_datum());
+    blur_datum->mutable_datum()->set_label(anno_datum.datum().label());
+
+    blur_datum->mutable_annotation_group()->CopyFrom(anno_datum.annotation_group());
+//    DataTransformer<Dtype>::ShowAnnotatedData("blur",*blur_datum);
+    return;
+  #else
+      LOG(FATAL) << "Encoded datum requires OpenCV; compile with USE_OPENCV.";
+  #endif  // USE_OPENCV
 }
 
 template<typename Dtype>
@@ -556,6 +881,8 @@ void DataTransformer<Dtype>::DistortImage(const Datum& datum,
     }
     // Distort the image.
     cv::Mat distort_img = ApplyDistort(cv_img, param_.distort_param());
+//    cv::imshow("distort_img",distort_img);
+//    cv::waitKey(0);
     // Save the image into datum.
     EncodeCVMatToDatum(distort_img, "jpg", distort_datum);
     distort_datum->set_label(datum.label());
@@ -804,11 +1131,16 @@ void DataTransformer<Dtype>::CropImage(const cv::Mat& img,
   const int img_height = img.rows;
   const int img_width = img.cols;
 
+//  std::cout<<"CropImage:"<<(bbox.xmax()-bbox.xmin())/(bbox.ymax()-bbox.ymin())<<std::endl;
+
   // Get the bbox dimension.
   NormalizedBBox clipped_bbox;
   ClipBBox(bbox, &clipped_bbox);
+//  std::cout<<"ClipImage:"<<(clipped_bbox.xmax()-clipped_bbox.xmin())/(clipped_bbox.ymax()-clipped_bbox.ymin())<<std::endl;
+
   NormalizedBBox scaled_bbox;
   ScaleBBox(clipped_bbox, img_height, img_width, &scaled_bbox);
+//  std::cout<<"ScaleImage:"<<(scaled_bbox.xmax()-scaled_bbox.xmin())/(scaled_bbox.ymax()-scaled_bbox.ymin())<<std::endl;
 
   // Crop the image using bbox.
   int w_off = static_cast<int>(scaled_bbox.xmin());
@@ -1108,8 +1440,9 @@ vector<int> DataTransformer<Dtype>::InferBlobShape(
 
 template <typename Dtype>
 void DataTransformer<Dtype>::InitRand() {
-  const bool needs_rand = param_.mirror() ||
-      (phase_ == TRAIN && param_.crop_size());
+//  const bool needs_rand = param_.mirror() ||
+//      (phase_ == TRAIN && param_.crop_size());
+  const bool needs_rand=true;
   if (needs_rand) {
     const unsigned int rng_seed = caffe_rng_rand();
     rng_.reset(new Caffe::RNG(rng_seed));

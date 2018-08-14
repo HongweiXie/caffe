@@ -8,7 +8,7 @@ endif()
 
 # ---[ Caffe project
 project(Caffe C CXX)
-
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
 # ---[ Caffe version
 set(CAFFE_TARGET_VERSION "1.0.0-rc3" CACHE STRING "Caffe logical version")
 set(CAFFE_TARGET_SOVERSION "1.0.0-rc3" CACHE STRING "Caffe soname version")

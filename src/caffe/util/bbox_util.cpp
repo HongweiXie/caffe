@@ -345,6 +345,7 @@ bool MeetEmitConstraint(const NormalizedBBox& src_bbox,
     }
   } else if (emit_type == EmitConstraint_EmitType_MIN_OVERLAP) {
     float bbox_coverage = BBoxCoverage(bbox, src_bbox);
+//    LOG(INFO)<<emit_constraint.emit_overlap();
     return bbox_coverage > emit_constraint.emit_overlap();
   } else {
     LOG(FATAL) << "Unknown emit type.";
