@@ -181,6 +181,7 @@ class DataTransformer {
   void BlurImage(const AnnotatedDatum& datum, AnnotatedDatum* blur_datum);
   void PerspectiveImage(const AnnotatedDatum& anno_datum,
                    AnnotatedDatum* perspectived_anno_datum);
+  void FlipImage(const AnnotatedDatum &anno_datum, AnnotatedDatum *fliped_anno_datum);
 #endif  // USE_OPENCV
 
   /**
