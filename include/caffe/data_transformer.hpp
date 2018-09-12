@@ -175,8 +175,8 @@ class DataTransformer {
                     const int width, const int channels);
 
   void RotateImage(const AnnotatedDatum& anno_datum,
-                   AnnotatedDatum* rotated_anno_datum);
-  void RotateImage(const Datum& datum, cv::Mat &affineMatrix, Datum* expanded_datum);
+                   AnnotatedDatum* rotated_anno_datum,float set_degree=0);
+//  void RotateImage(const Datum& datum, cv::Mat &affineMatrix, Datum* expanded_datum);
 
   void BlurImage(const AnnotatedDatum& datum, AnnotatedDatum* blur_datum);
   void PerspectiveImage(const AnnotatedDatum& anno_datum,

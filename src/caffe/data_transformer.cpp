@@ -570,9 +570,12 @@ void DataTransformer<Dtype>::FlipImage(const AnnotatedDatum &anno_datum, Annotat
 {
     float prob;
     caffe_rng_uniform(1, 0.f, 1.f, &prob);
-    if(prob>0.5)
+    if(prob>0.33)
     {
-        fliped_anno_datum->CopyFrom(anno_datum);
+        if(prob>0.66)
+            RotateImage(anno_datum,fliped_anno_datum,-90);
+        else
+            fliped_anno_datum->CopyFrom(anno_datum);
         return;
     }
     cv::Mat cv_img= DecodeDatumToCVMatNative(anno_datum.datum());
@@ -731,7 +734,7 @@ void DataTransformer<Dtype>::PerspectiveImage(const AnnotatedDatum &anno_datum, 
 }
 
 template<typename Dtype>
-void DataTransformer<Dtype>::RotateImage(const AnnotatedDatum &anno_datum, AnnotatedDatum *rotated_anno_datum)
+void DataTransformer<Dtype>::RotateImage(const AnnotatedDatum &anno_datum, AnnotatedDatum *rotated_anno_datum,float set_degree)
 {
     if(!param_.has_rotate_param())
     {
@@ -744,13 +747,13 @@ void DataTransformer<Dtype>::RotateImage(const AnnotatedDatum &anno_datum, Annot
     const float min_scale=0.8,max_scale=1.0;
     float prob;
     caffe_rng_uniform(1, 0.f, 1.f, &prob);
-    if (prob > rotate_prob) {
+    if (prob > rotate_prob&&set_degree==0) {
       rotated_anno_datum->CopyFrom(anno_datum);
       return;
     }
 
     caffe_rng_uniform(1, -1.f, 1.f, &prob);
-    float rotation_degree=prob*max_roate_degree;
+    float rotation_degree=prob*max_roate_degree+set_degree;
     cv::Mat cv_img;
     cv_img = DecodeDatumToCVMatNative(anno_datum.datum());
     const int img_height = anno_datum.datum().height();
@@ -763,6 +766,13 @@ void DataTransformer<Dtype>::RotateImage(const AnnotatedDatum &anno_datum, Annot
 
     cv::Mat rotated_img;
     cv::warpAffine(cv_img, rotated_img, rotateMatrix, cv::Size(img_width, img_height));
+    cv::Mat mask;
+    cv::inRange(rotated_img,cv::Scalar(0,0,0),cv::Scalar(0,0,0),mask);
+    mask-=(uchar)(prob*255);
+    cv::cvtColor(mask,mask,cv::COLOR_GRAY2BGR);
+    rotated_img+=mask;
+
+
     EncodeCVMatToDatum(rotated_img, "jpg", rotated_anno_datum->mutable_datum());
     rotated_anno_datum->mutable_datum()->set_label(anno_datum.datum().label());
 
