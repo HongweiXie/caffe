@@ -43,7 +43,7 @@ if __name__ == "__main__":
       help="Height images are resized to.")
   parser.add_argument("--resize-width", default = 0, type = int,
       help="Width images are resized to.")
-  parser.add_argument("--shuffle", default = False, action = "store_true",
+  parser.add_argument("--shuffle", default = True, action = "store_true",
       help="Randomly shuffle the order of images and their labels.")
   parser.add_argument("--check-label", default = False, action = "store_true",
       help="Check that there is no duplicated name/label.")

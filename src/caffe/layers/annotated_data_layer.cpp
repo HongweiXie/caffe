@@ -172,14 +172,14 @@ void AnnotatedDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
     }
     if(transform_param.has_expand_param())
     {
-//        AnnotatedDatum blur_datum;
-//        this->data_transformer_->BlurImage(*expand_datum,&blur_datum);
+        AnnotatedDatum blur_datum;
+        this->data_transformer_->BlurImage(*expand_datum,&blur_datum);
 
-        AnnotatedDatum fliped_datum;
-        this->data_transformer_->FlipImage(*expand_datum,&fliped_datum);
+//        AnnotatedDatum fliped_datum;
+//        this->data_transformer_->FlipImage(*expand_datum,&fliped_datum);
 
         AnnotatedDatum perspective_datum;
-        this->data_transformer_->PerspectiveImage(fliped_datum,&perspective_datum);
+        this->data_transformer_->PerspectiveImage(blur_datum,&perspective_datum);
 
         AnnotatedDatum* rotated_datum = new AnnotatedDatum();
         this->data_transformer_->RotateImage(perspective_datum,rotated_datum);
