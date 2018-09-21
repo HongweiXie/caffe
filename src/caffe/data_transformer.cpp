@@ -13,6 +13,7 @@
 #include "caffe/util/io.hpp"
 #include "caffe/util/math_functions.hpp"
 #include "caffe/util/rng.hpp"
+#include "caffe/util/mat_transform.hpp"
 
 namespace caffe {
 
@@ -314,12 +315,53 @@ void DataTransformer<Dtype>::TransformAnnotation(
         }
         NormalizedBBox proj_bbox;
         if (ProjectBBox(crop_bbox, resize_bbox, &proj_bbox)) {
+            bool keypoint_valid=true;
+            if(anno.has_group_keypoint())
+            {
+                const NormalizedKeyPointGroup &keypoint_group=anno.group_keypoint();
+                for(int b=0;b<2;b++)
+                {
+                    const NormalizedKeyPoint &keypoint=keypoint_group.keypoint(b);
+                    if(keypoint.x()<crop_bbox.xmin()||keypoint.x()>=crop_bbox.xmax()
+                            || keypoint.y()<crop_bbox.ymin() || keypoint.y()>=crop_bbox.ymax())
+                    {
+                        keypoint_valid=false;
+//                        std::cout<<keypoint.x()<<","<<keypoint.y()<<"--"<<crop_bbox.xmin()<<","<<crop_bbox.xmax()<<","<<crop_bbox.ymin()<<","<<crop_bbox.ymax()<<std::endl;
+
+                        break;
+                    }
+                }
+            }
+            if(!keypoint_valid)
+            {
+                continue;
+            }
+
+
           has_valid_annotation = true;
           Annotation* transformed_anno =
               transformed_anno_group.add_annotation();
           transformed_anno->set_instance_id(anno.instance_id());
           NormalizedBBox* transformed_bbox = transformed_anno->mutable_bbox();
           transformed_bbox->CopyFrom(proj_bbox);
+          if(anno.has_group_keypoint())
+          {
+              float w_ratio=crop_bbox.xmax()-crop_bbox.xmin();
+              float h_ratio=crop_bbox.ymax()-crop_bbox.ymin();
+//              std::cout<<"w h"<<w_ratio<<" "<< h_ratio<<std::endl;
+
+              NormalizedKeyPointGroup *transformed_keypoint_group=transformed_anno->mutable_group_keypoint();
+              for(int b=0;b<anno.group_keypoint().keypoint_size();b++)
+              {
+                  NormalizedKeyPoint *keypoint= transformed_keypoint_group->add_keypoint();
+                  keypoint->set_x((anno.group_keypoint().keypoint(b).x()-crop_bbox.xmin())/w_ratio);
+                  keypoint->set_y((anno.group_keypoint().keypoint(b).y()-crop_bbox.ymin())/h_ratio);
+//                  std::cout<<"x y"<<anno.group_keypoint().keypoint(b).x()<<" "<< anno.group_keypoint().keypoint(b).y()
+//                          <<" "<<keypoint->x()<<" "<<keypoint->y()<<std::endl;
+              }
+          }
+
+
           if (do_mirror) {
             Dtype temp = transformed_bbox->xmin();
             transformed_bbox->set_xmin(1 - transformed_bbox->xmax());
@@ -670,51 +712,50 @@ void DataTransformer<Dtype>::PerspectiveImage(const AnnotatedDatum &anno_datum, 
       for (int a = 0; a < anno_group.annotation_size(); ++a) {
         const Annotation& anno = anno_group.annotation(a);
         const NormalizedBBox& bbox = anno.bbox();
-
-        cv::Point2f lefttop(bbox.xmin()*img_width,bbox.ymin()*img_height);
-        cv::Point2f rightbottom(bbox.xmax()*img_width,bbox.ymax()*img_height);
-        cv::Point2f leftbottom(bbox.xmin()*img_width,bbox.ymax()*img_height);
-        cv::Point2f righttop(bbox.xmax()*img_width,bbox.ymin()*img_height);
-
-        std::vector<cv::Point2f> tmpInputPoints;
-        tmpInputPoints.push_back(lefttop);
-        tmpInputPoints.push_back(rightbottom);
-        tmpInputPoints.push_back(leftbottom);
-        tmpInputPoints.push_back(righttop);
-        std::vector<cv::Point2f> tmpOutputPoints;
-        tmpOutputPoints.resize(4);
-        cv::perspectiveTransform(tmpInputPoints,tmpOutputPoints,PM);
-
-        float xmin=img_width,ymin=img_height,xmax=0,ymax=0;
-        for(int i=0;i<4;i++)
-        {
-            const cv::Point2f &p=tmpOutputPoints[i];
-            xmin=std::min(p.x,xmin);
-            ymin=std::min(p.y,ymin);
-            xmax=std::max(p.x,xmax);
-            ymax=std::max(p.y,ymax);
-        }
-        NormalizedBBox proj_bbox=bbox;
-        proj_bbox.set_xmin(std::max(0.0f,xmin/img_width));
-        proj_bbox.set_ymin(std::max(0.0f,ymin/img_height));
-        proj_bbox.set_xmax(std::min(1.f,xmax/img_width));
-        proj_bbox.set_ymax(std::min(1.f,ymax/img_height));
+        NormalizedBBox proj_bbox;
+        perspectiveTransform(PM,bbox,img_width,img_height,proj_bbox);
         NormalizedBBox crop_bbox=bbox;
         crop_bbox.set_xmin(0.f);
         crop_bbox.set_ymin(0.f);
         crop_bbox.set_xmax(1.f);
         crop_bbox.set_ymax(1.f);
-//        if (param_.has_emit_constraint() &&
-//            !MeetEmitConstraint(crop_bbox, proj_bbox,
-//                                param_.emit_constraint())) {
-//          continue;
-//        }
+        NormalizedKeyPointGroup output_group_keypoint;
+        bool keypoints_valid=true;
+        if(anno.has_group_keypoint())
+        {
+            perspectiveTransform(PM,anno.group_keypoint(),img_width,img_height,output_group_keypoint);
+            for(int b=0;b<2;b++)
+            {
+                const NormalizedKeyPoint &keypoint=output_group_keypoint.keypoint(b);
+//                std::cout<<"input:"<<group_keypoint.keypoint(b).x()<<","<<group_keypoint.keypoint(b).y()<<std::endl;
+
+                if(keypoint.x()<0||keypoint.y()<0||keypoint.x()>=1||keypoint.y()>=1)
+                {
+                    keypoints_valid=false;
+//                    std::cout<<"perspective output:"<<keypoint.x()<<","<<keypoint.y()<<std::endl;
+                    break;
+                }
+            }
+        }
+        if(!keypoints_valid)
+            continue;
+
+
+        if (param_.has_emit_constraint() &&
+            !MeetEmitConstraint(crop_bbox, proj_bbox,
+                                param_.emit_constraint())) {
+          continue;
+        }
         has_valid_annotation=true;
         Annotation* transformed_anno =
             transformed_anno_group.add_annotation();
         transformed_anno->set_instance_id(anno.instance_id());
         NormalizedBBox* transformed_bbox = transformed_anno->mutable_bbox();
         transformed_bbox->CopyFrom(proj_bbox);
+        if(anno.has_group_keypoint())
+        {
+            transformed_anno->mutable_group_keypoint()->CopyFrom(output_group_keypoint);
+        }
 
       }
       if(has_valid_annotation)
@@ -788,41 +829,44 @@ void DataTransformer<Dtype>::RotateImage(const AnnotatedDatum &anno_datum, Annot
       for (int a = 0; a < anno_group.annotation_size(); ++a) {
         const Annotation& anno = anno_group.annotation(a);
         const NormalizedBBox& bbox = anno.bbox();
-
-        float tmpX[]={bbox.xmin()*img_width,bbox.xmax()*img_width};
-        float tmpY[]={bbox.ymin()*img_height,bbox.ymax()*img_height};
-        float xmin=img_width,ymin=img_height,xmax=0,ymax=0;
-//        std::cout<<rotateMatrix.at<double>(0,0)<<"--"<<rotateMatrix.at<double>(0,1)<<std::endl;
-        for(int i=0;i<2;i++)
+        NormalizedBBox src_bbox;
+        affineTransform(rotateMatrix,bbox,img_width,img_height,src_bbox);
+        NormalizedKeyPointGroup output_group_keypoint;
+        bool keypoints_valid=true;
+        if(anno.has_group_keypoint())
         {
-            for(int j=0;j<2;j++)
-            {
-                float x=tmpX[i];
-                float y=tmpY[j];
-                float x_new=rotateMatrix.at<double>(0,0)*x+rotateMatrix.at<double>(0,1)*y+rotateMatrix.at<double>(0,2);
-                float y_new=rotateMatrix.at<double>(1,0)*x+rotateMatrix.at<double>(1,1)*y+rotateMatrix.at<double>(1,2);
-//                std::cout<<x<<","<<y<<","<<","<<x_new<<","<<y_new<<std::endl;
-                xmin=std::min(x_new,xmin);
-                ymin=std::min(y_new,ymin);
-                xmax=std::max(x_new,xmax);
-                ymax=std::max(y_new,ymax);
-            }
-        }
+            const NormalizedKeyPointGroup &group_keypoint= anno.group_keypoint();
+            affineTransform(rotateMatrix,group_keypoint,img_width,img_height,output_group_keypoint);
 
-        NormalizedBBox src_bbox=bbox;
-        src_bbox.set_xmin(xmin/img_width);
-        src_bbox.set_ymin(ymin/img_height);
-        src_bbox.set_xmax(xmax/img_width);
-        src_bbox.set_ymax(ymax/img_height);
+            for(int b=0;b<2;b++)
+            {
+                const NormalizedKeyPoint &keypoint=output_group_keypoint.keypoint(b);
+//                std::cout<<"input:"<<group_keypoint.keypoint(b).x()<<","<<group_keypoint.keypoint(b).y()<<std::endl;
+
+                if(keypoint.x()<0||keypoint.y()<0||keypoint.x()>=1||keypoint.y()>=1)
+                {
+                    keypoints_valid=false;
+//                    std::cout<<"output:"<<keypoint.x()<<","<<keypoint.y()<<std::endl;
+
+                    break;
+                }
+            }
+
+        }
+        if(!keypoints_valid)
+        {
+            continue;
+        }
         NormalizedBBox proj_bbox=bbox;
-        proj_bbox.set_xmin(std::max(0.0f,xmin/img_width));
-        proj_bbox.set_ymin(std::max(0.0f,ymin/img_height));
-        proj_bbox.set_xmax(std::min(1.f,xmax/img_width));
-        proj_bbox.set_ymax(std::min(1.f,ymax/img_height));
+        proj_bbox.set_xmin(std::max(0.0f,src_bbox.xmin()));
+        proj_bbox.set_ymin(std::max(0.0f,src_bbox.ymin()));
+        proj_bbox.set_xmax(std::min(1.f,src_bbox.xmax()));
+        proj_bbox.set_ymax(std::min(1.f,src_bbox.ymax()));
 
         if (param_.has_emit_constraint() &&
             !MeetEmitConstraint( proj_bbox,src_bbox,
                                 param_.emit_constraint())) {
+
           continue;
         }
         has_valid_annotation=true;
@@ -831,8 +875,12 @@ void DataTransformer<Dtype>::RotateImage(const AnnotatedDatum &anno_datum, Annot
         transformed_anno->set_instance_id(anno.instance_id());
         NormalizedBBox* transformed_bbox = transformed_anno->mutable_bbox();
         transformed_bbox->CopyFrom(proj_bbox);
-
+        if(anno.has_group_keypoint())
+        {
+            transformed_anno->mutable_group_keypoint()->CopyFrom(output_group_keypoint);
+        }
       }
+
       if(has_valid_annotation)
       {
           transformed_anno_group.set_group_label(anno_group.group_label());
@@ -868,6 +916,16 @@ void DataTransformer<Dtype>::ShowAnnotatedData(const std::string &name,const Ann
         const Annotation& anno = anno_group.annotation(a);
         const NormalizedBBox& bbox = anno.bbox();
         cv::rectangle(cv_img,cv::Point2f(bbox.xmin()*img_width,bbox.ymin()*img_height),cv::Point2f(bbox.xmax()*img_width,bbox.ymax()*img_height),cv::Scalar(0,255,0),3);
+        if(anno.has_group_keypoint())
+        {
+            const NormalizedKeyPointGroup &keypoint_group=anno.group_keypoint();
+            for(int b=0;b<keypoint_group.keypoint_size();b++)
+            {
+                const NormalizedKeyPoint &keypoint=keypoint_group.keypoint(b);
+                cv::circle(cv_img,cv::Point2f(keypoint.x()*img_width,keypoint.y()*img_height),3,cv::Scalar(0,0,255),-1);
+            }
+        }
+
       }
     }
     cv::imshow(name,cv_img);

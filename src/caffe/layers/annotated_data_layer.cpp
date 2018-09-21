@@ -148,6 +148,7 @@ void AnnotatedDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
     timer.Start();
     // get a anno_datum
     AnnotatedDatum& anno_datum = *(reader_.full().pop("Waiting for data"));
+//    DataTransformer<Dtype>::ShowAnnotatedData("origin",anno_datum);
     read_time += timer.MicroSeconds();
     timer.Start();
     AnnotatedDatum distort_datum;
@@ -170,16 +171,17 @@ void AnnotatedDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
         expand_datum = &anno_datum;
       }
     }
+//    DataTransformer<Dtype>::ShowAnnotatedData("expandImage",*expand_datum);
     if(transform_param.has_expand_param())
     {
-        AnnotatedDatum blur_datum;
-        this->data_transformer_->BlurImage(*expand_datum,&blur_datum);
+//        AnnotatedDatum blur_datum;
+//        this->data_transformer_->BlurImage(*expand_datum,&blur_datum);
 
 //        AnnotatedDatum fliped_datum;
 //        this->data_transformer_->FlipImage(*expand_datum,&fliped_datum);
 
         AnnotatedDatum perspective_datum;
-        this->data_transformer_->PerspectiveImage(blur_datum,&perspective_datum);
+        this->data_transformer_->PerspectiveImage(*expand_datum,&perspective_datum);
 
         AnnotatedDatum* rotated_datum = new AnnotatedDatum();
         this->data_transformer_->RotateImage(perspective_datum,rotated_datum);

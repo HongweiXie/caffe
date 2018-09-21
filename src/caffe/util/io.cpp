@@ -351,6 +351,25 @@ bool ReadXMLToAnnotatedDatum(const string& labelfile, const int img_height,
           bbox->set_ymax(static_cast<float>(ymax) / height);
           bbox->set_difficult(difficult);
         }
+        else if(v2.first == "keypoints")
+        {
+            NormalizedKeyPointGroup *keypointGroup=anno->mutable_group_keypoint();
+            ptree keypoints=v2.second;
+            BOOST_FOREACH(ptree::value_type &v3, keypoints.get_child("")) {
+                ptree ptr3=v3.second;
+                if(v3.first=="keypoint")
+                {
+                    NormalizedKeyPoint *keypoint=keypointGroup->add_keypoint();
+                    string str_x = ptr3.get<string>("x");
+                    string str_y = ptr3.get<string>("y");
+                    float x=std::stof(str_x);
+                    float y=std::stof(str_y);
+//                    std::cout<<"x:"<<x<<",y:"<<y<<" "<<pt.get<string>("annotation.path")<<std::endl;
+                    keypoint->set_x(x/width);
+                    keypoint->set_y(y/height);
+                }
+            }
+        }
       }
     }
   }
