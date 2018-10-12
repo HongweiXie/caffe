@@ -690,6 +690,7 @@ message DistortionParameter {
   // The possible value is within [0, 255]. Recommend 32.
   optional float brightness_delta = 2 [default = 0.0];
 
+
   // The probability of adjusting contrast.
   optional float contrast_prob = 3 [default = 0.0];
   // Lower bound for random contrast factor. Recommend 0.5.
@@ -712,6 +713,8 @@ message DistortionParameter {
 
   // The probability of randomly order the image channels.
   optional float random_order_prob = 11 [default = 0.0];
+
+  optional float brightness_delta_low = 12 [default = 0.0];
 }
 
 // Message that stores parameters used by data transformer for expansion policy

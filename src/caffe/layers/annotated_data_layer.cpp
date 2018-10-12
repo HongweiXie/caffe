@@ -212,7 +212,7 @@ void AnnotatedDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
       sampled_datum = expand_datum;
     }
     CHECK(sampled_datum != NULL);
-//    DataTransformer<Dtype>::ShowAnnotatedData("sampled",*sampled_datum);
+    DataTransformer<Dtype>::ShowAnnotatedData("sampled",*sampled_datum);
 
     timer.Start();
     vector<int> shape =

@@ -16,7 +16,7 @@
 #include "caffe/util/mat_transform.hpp"
 
 namespace caffe {
-
+const float KEYPOINT_BIAS=0.035;
 template<typename Dtype>
 DataTransformer<Dtype>::DataTransformer(const TransformationParameter& param,
     Phase phase)
@@ -288,6 +288,7 @@ void DataTransformer<Dtype>::TransformAnnotation(
     const AnnotatedDatum& anno_datum, const bool do_resize,
     const NormalizedBBox& crop_bbox, const bool do_mirror,
     RepeatedPtrField<AnnotationGroup>* transformed_anno_group_all) {
+    bool debug_show=false;
   const int img_height = anno_datum.datum().height();
   const int img_width = anno_datum.datum().width();
   if (anno_datum.type() == AnnotatedDatum_AnnotationType_BBOX) {
@@ -311,7 +312,30 @@ void DataTransformer<Dtype>::TransformAnnotation(
         if (param_.has_emit_constraint() &&
             !MeetEmitConstraint(crop_bbox, resize_bbox,
                                 param_.emit_constraint())) {
-          continue;
+           if(anno.has_group_keypoint())
+           {
+               bool three_keypoint_valid=true;
+               const NormalizedKeyPointGroup &keypoint_group=anno.group_keypoint();
+               for(int b=0;b<3;b++)
+               {
+                   const NormalizedKeyPoint &keypoint=keypoint_group.keypoint(b);
+                   if(keypoint.x()<crop_bbox.xmin()||keypoint.x()>=crop_bbox.xmax()
+                           || keypoint.y()<crop_bbox.ymin() || keypoint.y()>=crop_bbox.ymax())
+                   {
+                       three_keypoint_valid=false;
+                       break;
+                   }
+               }
+               if(!three_keypoint_valid)
+                   continue;
+               else
+                   debug_show=true;
+           }
+           else
+           {
+               continue;
+           }
+
         }
         NormalizedBBox proj_bbox;
         if (ProjectBBox(crop_bbox, resize_bbox, &proj_bbox)) {
@@ -322,12 +346,12 @@ void DataTransformer<Dtype>::TransformAnnotation(
                 for(int b=0;b<2;b++)
                 {
                     const NormalizedKeyPoint &keypoint=keypoint_group.keypoint(b);
-                    if(keypoint.x()<crop_bbox.xmin()||keypoint.x()>=crop_bbox.xmax()
-                            || keypoint.y()<crop_bbox.ymin() || keypoint.y()>=crop_bbox.ymax())
+                    if(keypoint.x()<crop_bbox.xmin()-KEYPOINT_BIAS||keypoint.x()>=crop_bbox.xmax()+KEYPOINT_BIAS
+                            || keypoint.y()<crop_bbox.ymin()-KEYPOINT_BIAS || keypoint.y()>=crop_bbox.ymax()+KEYPOINT_BIAS)
                     {
                         keypoint_valid=false;
 //                        std::cout<<keypoint.x()<<","<<keypoint.y()<<"--"<<crop_bbox.xmin()<<","<<crop_bbox.xmax()<<","<<crop_bbox.ymin()<<","<<crop_bbox.ymax()<<std::endl;
-
+                        debug_show=true;
                         break;
                     }
                 }
@@ -381,6 +405,14 @@ void DataTransformer<Dtype>::TransformAnnotation(
     }
   } else {
     LOG(FATAL) << "Unknown annotation type.";
+  }
+  if(debug_show)
+  {
+      AnnotatedDatum debug_datum;
+      debug_datum.CopyFrom(anno_datum);
+      Annotation * test=debug_datum.mutable_annotation_group(0)->add_annotation();
+      test->mutable_bbox()->CopyFrom(crop_bbox);
+      ShowAnnotatedData("crop",debug_datum);
   }
 }
 
@@ -672,6 +704,7 @@ void DataTransformer<Dtype>::PerspectiveImage(const AnnotatedDatum &anno_datum, 
         perspectived_anno_datum->CopyFrom(anno_datum);
         return;
     }
+    bool debug_show=false;
     const float perpective_prob=param_.perspective_param().prob();
     const float perspective_min_ratio=param_.perspective_param().min_perspective_ratio();
     const float perspective_max_ratio=param_.perspective_param().max_perspective_ratio();
@@ -729,9 +762,10 @@ void DataTransformer<Dtype>::PerspectiveImage(const AnnotatedDatum &anno_datum, 
                 const NormalizedKeyPoint &keypoint=output_group_keypoint.keypoint(b);
 //                std::cout<<"input:"<<group_keypoint.keypoint(b).x()<<","<<group_keypoint.keypoint(b).y()<<std::endl;
 
-                if(keypoint.x()<0||keypoint.y()<0||keypoint.x()>=1||keypoint.y()>=1)
+                if(keypoint.x()<-KEYPOINT_BIAS||keypoint.y()<-KEYPOINT_BIAS||keypoint.x()>=1+KEYPOINT_BIAS||keypoint.y()>=1+KEYPOINT_BIAS)
                 {
                     keypoints_valid=false;
+                    debug_show=true;
 //                    std::cout<<"perspective output:"<<keypoint.x()<<","<<keypoint.y()<<std::endl;
                     break;
                 }
@@ -744,7 +778,29 @@ void DataTransformer<Dtype>::PerspectiveImage(const AnnotatedDatum &anno_datum, 
         if (param_.has_emit_constraint() &&
             !MeetEmitConstraint(crop_bbox, proj_bbox,
                                 param_.emit_constraint())) {
-          continue;
+            if(anno.has_group_keypoint())
+            {
+                bool three_keypoint_valid=true;
+                const NormalizedKeyPointGroup &keypoint_group=anno.group_keypoint();
+                for(int b=0;b<3;b++)
+                {
+                    const NormalizedKeyPoint &keypoint=keypoint_group.keypoint(b);
+                    if(keypoint.x()<0||keypoint.x()>=1
+                            || keypoint.y()<0 || keypoint.y()>=1)
+                    {
+                        three_keypoint_valid=false;
+                        break;
+                    }
+                }
+                if(!three_keypoint_valid)
+                    continue;
+                else
+                    debug_show=true;
+            }
+            else
+            {
+                continue;
+            }
         }
         has_valid_annotation=true;
         Annotation* transformed_anno =
@@ -771,7 +827,8 @@ void DataTransformer<Dtype>::PerspectiveImage(const AnnotatedDatum &anno_datum, 
         perspectived_anno_datum->CopyFrom(anno_datum);
         return;
     }
-//    ShowAnnotatedData("perspective",*perspectived_anno_datum);
+    if(debug_show)
+        ShowAnnotatedData("perspective",*perspectived_anno_datum);
 }
 
 template<typename Dtype>
@@ -782,6 +839,7 @@ void DataTransformer<Dtype>::RotateImage(const AnnotatedDatum &anno_datum, Annot
         rotated_anno_datum->CopyFrom(anno_datum);
         return;
     }
+    bool debug_show=false;
     const float rotate_prob=param_.rotate_param().prob();
     const float max_roate_degree=param_.rotate_param().rotate_delta();
 //    LOG(INFO)<<"rotate:"<<rotate_prob<<","<<max_roate_degree;
@@ -843,11 +901,11 @@ void DataTransformer<Dtype>::RotateImage(const AnnotatedDatum &anno_datum, Annot
                 const NormalizedKeyPoint &keypoint=output_group_keypoint.keypoint(b);
 //                std::cout<<"input:"<<group_keypoint.keypoint(b).x()<<","<<group_keypoint.keypoint(b).y()<<std::endl;
 
-                if(keypoint.x()<0||keypoint.y()<0||keypoint.x()>=1||keypoint.y()>=1)
+                if(keypoint.x()<-KEYPOINT_BIAS||keypoint.y()<-KEYPOINT_BIAS||keypoint.x()>=1+KEYPOINT_BIAS||keypoint.y()>=1+KEYPOINT_BIAS)
                 {
                     keypoints_valid=false;
 //                    std::cout<<"output:"<<keypoint.x()<<","<<keypoint.y()<<std::endl;
-
+                    debug_show=true;
                     break;
                 }
             }
@@ -867,7 +925,31 @@ void DataTransformer<Dtype>::RotateImage(const AnnotatedDatum &anno_datum, Annot
             !MeetEmitConstraint( proj_bbox,src_bbox,
                                 param_.emit_constraint())) {
 
-          continue;
+            if(anno.has_group_keypoint())
+            {
+                bool three_keypoint_valid=true;
+                const NormalizedKeyPointGroup &keypoint_group=anno.group_keypoint();
+                for(int b=0;b<3;b++)
+                {
+                    const NormalizedKeyPoint &keypoint=keypoint_group.keypoint(b);
+                    if(keypoint.x()<0||keypoint.x()>=1
+                            || keypoint.y()<0 || keypoint.y()>=1)
+                    {
+                        three_keypoint_valid=false;
+                        break;
+                    }
+                }
+                if(!three_keypoint_valid)
+                    continue;
+                else
+                {
+                    debug_show=true;
+                }
+            }
+            else
+            {
+                continue;
+            }
         }
         has_valid_annotation=true;
         Annotation* transformed_anno =
@@ -894,7 +976,8 @@ void DataTransformer<Dtype>::RotateImage(const AnnotatedDatum &anno_datum, Annot
         rotated_anno_datum->CopyFrom(anno_datum);
         return;
     }
-//    ShowAnnotatedData("roated_img",*rotated_anno_datum);
+    if(debug_show)
+        ShowAnnotatedData("roated_img",*rotated_anno_datum);
 }
 
 
@@ -903,6 +986,7 @@ void DataTransformer<Dtype>::RotateImage(const AnnotatedDatum &anno_datum, Annot
 template<typename Dtype>
 void DataTransformer<Dtype>::ShowAnnotatedData(const std::string &name,const AnnotatedDatum &expanded_anno_datum)
 {
+#if 0
     cv::Mat cv_img;
     cv_img = DecodeDatumToCVMatNative(expanded_anno_datum.datum());
     const int img_height = expanded_anno_datum.datum().height();
@@ -930,6 +1014,7 @@ void DataTransformer<Dtype>::ShowAnnotatedData(const std::string &name,const Ann
     }
     cv::imshow(name,cv_img);
     cv::waitKey(0);
+#endif
 }
 template<typename Dtype>
 void DataTransformer<Dtype>::BlurImage(const AnnotatedDatum &anno_datum, AnnotatedDatum *blur_datum)

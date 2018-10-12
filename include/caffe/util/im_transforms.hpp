@@ -57,7 +57,7 @@ cv::Mat ApplyNoise(const cv::Mat& in_img, const NoiseParameter& param);
 
 
 void RandomBrightness(const cv::Mat& in_img, cv::Mat* out_img,
-    const float brightness_prob, const float brightness_delta);
+    const float brightness_prob, const float brightness_delta,const float brightness_low);
 
 void AdjustBrightness(const cv::Mat& in_img, const float delta,
                       cv::Mat* out_img);
